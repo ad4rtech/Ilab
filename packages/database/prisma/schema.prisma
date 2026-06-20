@@ -1,0 +1,290 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ── Auth (NextAuth.js v5 / Prisma adapter shape) ───────────────────────────
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role      @default(CUSTOMER)
+  password      String?   // hashed, null for OAuth-only users (future Google login)
+  createdAt     DateTime  @default(now())
+
+  accounts      Account[]
+  sessions      Session[]
+  orders        Order[]
+  enrollments   Enrollment[]
+  inquiries     Inquiry[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── E2: Digital Products Store ──────────────────────────────────────────
+
+model Category {
+  id    String @id @default(cuid())
+  name  String
+  slug  String @unique
+  type  CategoryType
+
+  products Product[]
+  courses  Course[]
+}
+
+enum CategoryType {
+  PRODUCT
+  COURSE
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  description String   @db.Text
+  price       Decimal  @db.Decimal(10, 2)
+  currency    String   @default("KES")
+  fileUrl     String   // secure download link, post-purchase
+  previewUrl  String?
+  published   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  orderItems OrderItem[]
+}
+
+// ── E3: Online Courses Platform ─────────────────────────────────────────
+
+model Course {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  description     String   @db.Text
+  price           Decimal  @db.Decimal(10, 2)
+  currency        String   @default("KES")
+  instructorName  String?
+  instructorBio   String?  @db.Text
+  published       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  lessons     Lesson[]
+  enrollments Enrollment[]
+  orderItems  OrderItem[]
+}
+
+model Lesson {
+  id          String  @id @default(cuid())
+  courseId    String
+  title       String
+  videoUrl    String  // Bunny.net stream URL
+  order       Int
+  durationSec Int?
+
+  course   Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  progress LessonProgress[]
+}
+
+model Enrollment {
+  id          String   @id @default(cuid())
+  userId      String
+  courseId    String
+  enrolledAt  DateTime @default(now())
+  certificateIssued Boolean @default(false) // US-20: infra ready, inactive in V1
+
+  user     User             @relation(fields: [userId], references: [id])
+  course   Course           @relation(fields: [courseId], references: [id])
+  progress LessonProgress[]
+
+  @@unique([userId, courseId])
+}
+
+model LessonProgress {
+  id           String   @id @default(cuid())
+  enrollmentId String
+  lessonId     String
+  completed    Boolean  @default(false)
+  completedAt  DateTime?
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  lesson     Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, lessonId])
+}
+
+// ── E2/E3: Orders & Payments (shared checkout for products + courses) ───
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  MPESA
+  CARD
+  PAYPAL
+}
+
+model Order {
+  id        String        @id @default(cuid())
+  userId    String
+  total     Decimal       @db.Decimal(10, 2)
+  currency  String        @default("KES")
+  status    OrderStatus   @default(PENDING)
+  method    PaymentMethod?
+  createdAt DateTime      @default(now())
+
+  user     User        @relation(fields: [userId], references: [id])
+  items    OrderItem[]
+  payments Payment[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  productId String?
+  courseId  String?
+  price     Decimal @db.Decimal(10, 2)
+  quantity  Int     @default(1)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
+  course  Course?  @relation(fields: [courseId], references: [id])
+}
+
+// Tracks the M-Pesa STK push lifecycle (US-11a–d) and card/PayPal callbacks
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String
+  provider    PaymentMethod
+  providerRef String?       // Flutterwave/Daraja transaction reference
+  phoneNumber String?       // for M-Pesa STK push (US-11a)
+  amount      Decimal       @db.Decimal(10, 2)
+  status      OrderStatus   @default(PENDING)
+  rawPayload  Json?         // store provider callback for debugging
+  createdAt   DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+// ── E4: Services & Lead Capture ─────────────────────────────────────────
+
+model Service {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  description String   @db.Text
+  published   Boolean  @default(false)
+
+  inquiries Inquiry[]
+}
+
+enum InquiryStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+model Inquiry {
+  id          String        @id @default(cuid())
+  name        String
+  company     String?
+  phone       String
+  email       String
+  message     String        @db.Text
+  status      InquiryStatus @default(NEW)
+  createdAt   DateTime      @default(now())
+
+  serviceId String?
+  service   Service? @relation(fields: [serviceId], references: [id])
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+}
+
+model ConsultationBooking {
+  id            String   @id @default(cuid())
+  name          String
+  email         String
+  phone         String
+  preferredDate DateTime
+  message       String?  @db.Text
+  createdAt     DateTime @default(now())
+}
+
+// ── E6: Email Marketing (local mirror for admin reporting; ConvertKit owns automation) ──
+
+model Subscriber {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  source       String?  // e.g. "homepage", "lead-magnet", "blog"
+  segment      String?  // "products" | "courses" | "services"
+  subscribedAt DateTime @default(now())
+}
+
+// ── E1: Testimonials (home page) ────────────────────────────────────────
+
+model Testimonial {
+  id        String  @id @default(cuid())
+  name      String
+  role      String?
+  company   String?
+  quote     String  @db.Text
+  avatarUrl String?
+  published Boolean @default(true)
+}

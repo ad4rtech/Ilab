@@ -1,6 +1,5 @@
 import localFont from 'next/font/local'
 import type { Metadata } from "next";
-import "./globals.css";
 import { Lexend, Courier_Prime } from "next/font/google";
 import { cn } from "@/lib/utils";
 
