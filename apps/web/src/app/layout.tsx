@@ -1,4 +1,7 @@
-import localFont from 'next/font/local'
+import { Toaster } from "sonner"
+import { SessionProviderWrapper } from "@/components/auth/SessionProviderWrapper";
+import "./globals.css";
+import localFont from "next/font/local";
 import type { Metadata } from "next";
 import { Lexend, Courier_Prime } from "next/font/google";
 import { cn } from "@/lib/utils";
@@ -10,12 +13,24 @@ const lexend = Lexend({
 
 const sansation = localFont({
   src: [
-    { path: '../fonts/Sansation-Light.ttf', weight: '300', style: 'normal' },
-    { path: '../fonts/Sansation-Regular.ttf', weight: '400', style: 'normal' },
-    { path: '../fonts/Sansation-Bold.ttf', weight: '700', style: 'normal' },
+    {
+      path: "../fonts/Sansation-Light.ttf",
+      weight: "300",
+      style: "normal",
+    },
+    {
+      path: "../fonts/Sansation-Regular.ttf",
+      weight: "400",
+      style: "normal",
+    },
+    {
+      path: "../fonts/Sansation-Bold.ttf",
+      weight: "700",
+      style: "normal",
+    },
   ],
-  variable: '--font-sansation',
-})
+  variable: "--font-sansation",
+});
 
 const courierPrime = Courier_Prime({
   subsets: ["latin"],
@@ -44,7 +59,10 @@ export default function RootLayout({
       )}
     >
       <body className="antialiased">
-        {children}
+        <SessionProviderWrapper>
+          <Toaster richColors position="top-center" />
+          {children}
+        </SessionProviderWrapper>
       </body>
     </html>
   );
